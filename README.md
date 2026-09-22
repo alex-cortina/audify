@@ -2,6 +2,8 @@
 
 A small, fast audio file editor. No bloat.
 
+**Download:** get the Windows installer from the [Releases page](https://github.com/alex-cortina/audify/releases/latest).
+
 ## Run
 
 ```
