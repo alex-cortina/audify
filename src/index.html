@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' blob:;">
+  <title>Audify</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header id="toolbar">
+    <div class="group">
+      <button id="btnOpen" title="Open (Ctrl+O)">Open</button>
+      <button id="btnExport" title="Export WAV (Ctrl+S)" disabled>Export WAV</button>
+      <button id="btnExportMp3" title="Export MP3 (Ctrl+Shift+S)" disabled>Export MP3</button>
+      <select id="mp3Rate" title="MP3 quality"><option value="128">128 kbps</option><option value="192" selected>192 kbps</option><option value="320">320 kbps</option></select>
+    </div>
+    <div class="group">
+      <button id="btnPlay" title="Play / Pause (Space)" disabled>&#9654; Play</button>
+      <button id="btnStop" title="Stop (Esc)" disabled>&#9632; Stop</button>
+      <label class="check"><input type="checkbox" id="chkLoop"> Loop</label>
+    </div>
+    <div class="group">
+      <button id="btnUndo" title="Undo (Ctrl+Z)" disabled>Undo</button>
+      <button id="btnRedo" title="Redo (Ctrl+Y)" disabled>Redo</button>
+    </div>
+    <div class="group">
+      <button id="btnCut" title="Cut (Ctrl+X)" disabled>Cut</button>
+      <button id="btnCopy" title="Copy (Ctrl+C)" disabled>Copy</button>
+      <button id="btnPaste" title="Paste (Ctrl+V)" disabled>Paste</button>
+      <button id="btnDelete" title="Delete (Del)" disabled>Delete</button>
+      <button id="btnTrim" title="Trim to selection (Ctrl+T)" disabled>Trim</button>
+      <button id="btnSilence" title="Silence selection (Ctrl+L)" disabled>Silence</button>
+    </div>
+    <div class="group">
+      <button id="btnFadeIn" disabled>Fade In</button>
+      <button id="btnFadeOut" disabled>Fade Out</button>
+      <button id="btnNormalize" disabled>Normalize</button>
+      <button id="btnReverse" disabled>Reverse</button>
+      <label class="inline">Gain <input type="number" id="gainDb" value="0" step="0.5" style="width:56px"> dB
+        <button id="btnGain" disabled>Apply</button></label>
+    </div>
+    <div class="group">
+      <button id="btnZoomIn" title="Zoom in (+)" disabled>+</button>
+      <button id="btnZoomOut" title="Zoom out (-)" disabled>&minus;</button>
+      <button id="btnZoomFit" title="Zoom to fit (0)" disabled>Fit</button>
+      <button id="btnZoomSel" title="Zoom to selection (Z)" disabled>Sel</button>
+    </div>
+  </header>
+
+  <main id="editor">
+    <div id="empty">
+      <div class="drop">
+        <h1>Audify</h1>
+        <p>Drop an audio or video file here, or press <kbd>Ctrl</kbd>+<kbd>O</kbd>.</p>
+        <p class="small">Video files: only the sound is loaded.</p>
+      </div>
+    </div>
+    <div id="waveWrap" hidden>
+      <canvas id="ruler"></canvas>
+      <canvas id="wave"></canvas>
+      <div id="scrollbar"><div id="thumb"></div></div>
+    </div>
+  </main>
+
+  <footer id="status">
+    <span id="stFile">No file</span>
+    <span id="stInfo"></span>
+    <span id="stCursor">0:00.000</span>
+    <span id="stSel"></span>
+    <span id="stMsg"></span>
+  </footer>
+
+  <script src="vendor/lame.min.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

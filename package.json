@@ -1,0 +1,62 @@
+{
+  "name": "audify",
+  "version": "0.1.0",
+  "description": "A small, fast audio file editor.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "author": "Alex",
+  "build": {
+    "appId": "com.audify.app",
+    "productName": "Audify",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "LICENSE",
+      "THIRD_PARTY_NOTICES.md"
+    ],
+    "win": {
+      "target": [
+        "dir",
+        "nsis"
+      ],
+      "icon": "build/icon.png",
+      "signAndEditExecutable": true
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Audify"
+    },
+    "fileAssociations": [
+      {
+        "ext": [
+          "wav",
+          "mp3",
+          "ogg",
+          "flac",
+          "m4a",
+          "aiff"
+        ],
+        "name": "Audio File",
+        "role": "Editor"
+      }
+    ]
+  },
+  "dependencies": {
+    "lamejs": "^1.2.1"
+  }
+}
