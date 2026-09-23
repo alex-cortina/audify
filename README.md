@@ -1,6 +1,6 @@
 # Audify
 
-A small, fast audio file editor. No bloat.
+A small, fast audio file editor.
 
 **Download:** get the Windows installer from the [Releases page](https://github.com/alex-cortina/audify/releases/latest).
 
