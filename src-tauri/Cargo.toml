@@ -10,6 +10,11 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+mp3lame-encoder = "0.2.5"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+symphonia = { version = "0.6.1", features = ["all"] }
+symphonia-adapter-libopus = "0.3.0"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 
@@ -19,3 +24,15 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+# The C audio libraries (libopus, LAME) are built for speed, not size: decoding and MP3
+# encoding are the slow parts of opening and exporting a song.
+[profile.release.package.opusic-sys]
+opt-level = 3
+
+[profile.release.package.mp3lame-sys]
+opt-level = 3
+
+[target."cfg(windows)".dependencies]
+webview2-com = "0.39.1"
+windows-core = "0.62"
