@@ -1,19 +1,19 @@
 'use strict';
 
 // ---------- State ----------
+// Rust (src-tauri/src/editor.rs) owns the document, edits and undo history.
+// `doc.channels` is the page's mirror of the samples, used for drawing and playback.
 const doc = {
   channels: null,      // Float32Array[]
   sampleRate: 44100,
   name: '',
   dirty: false,
 };
+const rs = { canUndo: false, canRedo: false, hasClip: false }; // flags from Rust
 const view = { start: 0, spp: 1 };            // first visible sample, samples per pixel
 let sel = null;                               // { start, end } in samples (start < end)
 let cursor = 0;                               // samples
-let clipboard = null;                         // { channels, sampleRate }
-const undoStack = [], redoStack = [];
-const MAX_UNDO = 30;
-let peaks = null;                             // per channel: { min: Float32Array, max: Float32Array }
+let peaks = null;                            // per channel: { min: Float32Array, max: Float32Array }
 const PEAK_BLOCK = 256;
 
 // Playback
@@ -41,30 +41,31 @@ function setMsg(t) {
   $('stMsg').textContent = t;
   if (t && !exporting) setTimeout(() => { if ($('stMsg').textContent === t) $('stMsg').textContent = ''; }, 3000);
 }
-function cloneChannels(chs) { return chs.map(c => new Float32Array(c)); }
+// ---------- Rust ----------
+// Calls run one at a time, so replies are applied in the order the edits were made.
+let queue = Promise.resolve();
+const enqueue = (fn) => (queue = queue.then(fn).catch((e) => { console.error(e); setMsg('Error: ' + e); }));
 
-function pushUndo() {
-  undoStack.push({ channels: cloneChannels(doc.channels), sel: sel && { ...sel }, cursor });
-  if (undoStack.length > MAX_UNDO) undoStack.shift();
-  redoStack.length = 0;
-  doc.dirty = true;
+function syncFlags(state) {
+  doc.dirty = state.dirty;
+  rs.canUndo = state.canUndo; rs.canRedo = state.canRedo; rs.hasClip = state.hasClip;
 }
-function applySnapshot(s) {
-  doc.channels = s.channels; sel = s.sel; cursor = s.cursor;
-  afterEdit();
+// Apply an edit reply: replay Rust's splices on the mirror, then take its selection and cursor.
+function applyEdit({ state, splices, release }) {
+  for (const sp of splices) replaceRange(sp.at, sp.at + sp.remove, sp.data);
+  if (release) release(); // the mirror holds copies now
+  syncFlags(state);
+  sel = state.sel ? { start: state.sel[0], end: state.sel[1] } : null;
+  cursor = state.cursor;
+  if (splices.length) afterEdit(); else { updateUI(); draw(); }
+  if (state.msg) setMsg(state.msg);
 }
-function undo() {
-  if (!undoStack.length) return;
-  redoStack.push({ channels: doc.channels, sel: sel && { ...sel }, cursor });
-  applySnapshot(undoStack.pop());
-  setMsg('Undo');
+function run(op, db) {
+  if (!hasDoc()) return queue;
+  return enqueue(async () => applyEdit(await window.audify.edit(op, hasSel() ? sel : null, cursor, db)));
 }
-function redo() {
-  if (!redoStack.length) return;
-  undoStack.push({ channels: doc.channels, sel: sel && { ...sel }, cursor });
-  applySnapshot(redoStack.pop());
-  setMsg('Redo');
-}
+function undo() { if (rs.canUndo) run('undo'); }
+function redo() { if (rs.canRedo) run('redo'); }
 
 function buildPeaks() {
   peaks = doc.channels.map(ch => {
@@ -142,111 +143,77 @@ function sniffSampleRate(ab) {
   } catch (_) { /* fall through */ }
   return 0;
 }
-async function loadArrayBuffer(name, ab) {
-  try {
-    const isVideo = /\.(mp4|m4v|mov|mkv|webm)$/i.test(name);
-    setMsg(isVideo ? 'Ripping audio from video…' : 'Decoding…');
-    stopSource();
-    // Decode at the file's own sample rate so nothing gets resampled.
-    const rate = sniffSampleRate(ab) || getCtx().sampleRate;
-    const buf = await new OfflineAudioContext(1, 1, rate).decodeAudioData(ab.slice(0));
-    doc.channels = [];
-    for (let c = 0; c < buf.numberOfChannels; c++) doc.channels.push(buf.getChannelData(c).slice());
-    doc.sampleRate = buf.sampleRate;
-    doc.name = name;
-    doc.dirty = false;
-    dataVersion++;
-    undoStack.length = 0; redoStack.length = 0;
-    sel = null; cursor = 0;
-    buildPeaks();
-    empty.hidden = true; waveWrap.hidden = false;
-    resize();
-    zoomFit();
-    updateUI();
-    setMsg(isVideo ? `Ripped audio from ${name}` : `Loaded ${name}`);
-    console.log('[audify] loaded', name, doc.sampleRate, 'Hz', doc.channels.length, 'ch', length(), 'samples');
-  } catch (e) {
-    console.error(e);
-    setMsg(/\.(mp4|m4v|mov|mkv|webm)$/i.test(name) ? 'No audio track found in that video (or the codec is not supported).' : 'Could not decode that file.');
-  }
+const isVideoName = (name) => /\.(mp4|m4v|mov|mkv|webm)$/i.test(name);
+function showDoc(name, channels, rate) {
+  doc.channels = channels;
+  doc.sampleRate = rate;
+  doc.name = name;
+  dataVersion++;
+  sel = null; cursor = 0;
+  buildPeaks();
+  empty.hidden = true; empty.classList.remove('loading'); waveWrap.hidden = false;
+  resize();
+  zoomFit();
+  updateUI();
+  setMsg(isVideoName(name) ? `Ripped audio from ${name}` : `Loaded ${name}`);
+  console.log('[audify] loaded', name, doc.sampleRate, 'Hz', doc.channels.length, 'ch', length(), 'samples');
+}
+// Rust decodes the file. If it cannot (Opus in WEBM/MKV, for example), the page's own
+// decoder takes over and hands the samples to Rust.
+function loadPath(path) {
+  const name = path.split(/[\\/]/).pop();
+  setMsg(isVideoName(name) ? 'Ripping audio from video…' : 'Decoding…');
+  stopSource();
+  // Before the first file is shown, say what is happening instead of showing the drop box.
+  if (!hasDoc()) { $('opening').textContent = `Opening ${name}…`; empty.classList.add('loading'); }
+  return enqueue(async () => {
+    try {
+      const { state, splices } = await window.audify.openPath(path);
+      syncFlags(state);
+      showDoc(state.name, splices[0].data, state.rate);
+      return;
+    } catch (e) { console.warn('[audify] Rust could not decode, using the page decoder:', e); }
+    try {
+      const { data } = await window.audify.readFile(path);
+      // Decode at the file's own sample rate so nothing gets resampled.
+      const rate = sniffSampleRate(data) || getCtx().sampleRate;
+      const buf = await new OfflineAudioContext(1, 1, rate).decodeAudioData(data);
+      const chans = [];
+      for (let c = 0; c < buf.numberOfChannels; c++) chans.push(buf.getChannelData(c).slice());
+      syncFlags(await window.audify.loadSamples(name, buf.sampleRate, chans));
+      showDoc(name, chans, buf.sampleRate);
+    } catch (e) {
+      console.error(e);
+      empty.classList.remove('loading');
+      setMsg(isVideoName(name) ? 'No audio track found in that video (or the codec is not supported).' : 'Could not decode that file.');
+    }
+  });
 }
 async function openFile() {
-  const r = await window.audify.openFile();
-  if (r) loadArrayBuffer(r.name, r.data);
+  const p = await window.audify.openDialog();
+  if (p) loadPath(p);
 }
-window.audify.onOpenPath(async (p) => {
-  try {
-    const r = await window.audify.readFile(p);
-    if (r) loadArrayBuffer(r.name, r.data);
-  } catch (e) { console.error(e); setMsg('Could not open ' + p); }
-});
-
-function encodeWav(channels, sampleRate) {
-  const nCh = channels.length, n = channels[0].length, bytesPerSample = 2;
-  const dataSize = n * nCh * bytesPerSample;
-  const buf = new ArrayBuffer(44 + dataSize);
-  const dv = new DataView(buf);
-  const str = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
-  str(0, 'RIFF'); dv.setUint32(4, 36 + dataSize, true); str(8, 'WAVE');
-  str(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, nCh, true);
-  dv.setUint32(24, sampleRate, true); dv.setUint32(28, sampleRate * nCh * bytesPerSample, true);
-  dv.setUint16(32, nCh * bytesPerSample, true); dv.setUint16(34, 16, true);
-  str(36, 'data'); dv.setUint32(40, dataSize, true);
-  let o = 44;
-  for (let i = 0; i < n; i++) {
-    for (let c = 0; c < nCh; c++) {
-      const v = clamp(channels[c][i], -1, 1);
-      dv.setInt16(o, v < 0 ? v * 0x8000 : v * 0x7fff, true);
-      o += 2;
-    }
-  }
-  return buf;
-}
-async function exportWav() {
-  if (!hasDoc()) return;
-  const base = doc.name.replace(/\.[^.]+$/, '') || 'audio';
-  const data = encodeWav(doc.channels, doc.sampleRate);
-  const p = await window.audify.saveWav(base + '.wav', data);
-  if (p) { doc.dirty = false; setMsg('Saved ' + p); updateUI(); }
-}
+window.audify.onOpenPath(loadPath);
 
 let exporting = false;
-const MP3_RATES = [8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000];
-async function exportMp3() {
+async function exportWith(fn, label) {
   if (!hasDoc() || exporting) return;
   exporting = true; updateUI();
-  let worker = null;
   try {
-    const kbps = parseInt($('mp3Rate').value, 10) || 192;
-    // LAME only accepts these rates; resample anything else to 44100.
-    let chans = doc.channels.slice(0, 2), rate = doc.sampleRate;
-    if (!MP3_RATES.includes(rate)) { chans = chans.map(c => resample(c, rate, 44100)); rate = 44100; }
-    const toInt16 = (f) => { const o = new Int16Array(f.length); for (let i = 0; i < f.length; i++) { const v = clamp(f[i], -1, 1); o[i] = v < 0 ? v * 0x8000 : v * 0x7fff; } return o; };
-    const left = toInt16(chans[0]), right = chans[1] ? toInt16(chans[1]) : null;
-    setMsg('Encoding MP3… 0%');
-    worker = new Worker('mp3worker.js');
-    const data = await new Promise((resolve, reject) => {
-      worker.onmessage = (e) => {
-        const m = e.data;
-        if (m.type === 'progress') setMsg(`Encoding MP3… ${m.pct}%`);
-        else if (m.type === 'done') resolve(m.data);
-        else reject(new Error(m.message));
-      };
-      worker.onerror = (e) => reject(new Error(e.message || 'worker failed'));
-      const transfer = right ? [left.buffer, right.buffer] : [left.buffer];
-      worker.postMessage({ left, right, sampleRate: rate, kbps }, transfer);
-    });
-    const base = doc.name.replace(/\.[^.]+$/, '') || 'audio';
-    setMsg('Choose where to save…');
-    const saved = await window.audify.saveWav(base + '.mp3', data);
+    await queue; // let pending edits land first
+    const saved = await fn();
     if (saved) { doc.dirty = false; setMsg('Saved ' + saved); } else setMsg('Export cancelled');
   } catch (e) {
-    console.error(e); setMsg('MP3 export failed: ' + (e && e.message ? e.message : e));
+    console.error(e); setMsg(`${label} export failed: ${e}`);
   } finally {
-    if (worker) worker.terminate();
     exporting = false; updateUI();
   }
 }
+const exportWav = () => exportWith(() => window.audify.exportWav(), 'WAV');
+const exportMp3 = () => exportWith(() => {
+  const kbps = parseInt($('mp3Rate').value, 10) || 192;
+  return window.audify.exportMp3(kbps, (pct) => setMsg(`Encoding MP3… ${pct}%`));
+}, 'MP3');
 
 // ---------- Playback ----------
 function getCtx() {
@@ -321,88 +288,34 @@ function stop() {
 }
 
 // ---------- Editing ----------
-function selOrAll() { return hasSel() ? { ...sel } : { start: 0, end: length() }; }
+// The edits run in Rust (editor.rs). Each one replies with the samples it changed.
 
-function replaceRange(start, end, insert /* Float32Array[] or null */) {
+// Replace [start, end) of the mirror with `insert` (Float32Array[] or null).
+function replaceRange(start, end, insert) {
   const nCh = doc.channels.length;
   const insLen = insert ? insert[0].length : 0;
-  const out = [];
   for (let c = 0; c < nCh; c++) {
     const src = doc.channels[c];
+    const ins = insert && insert[c % insert.length];
+    if (insLen === end - start) { if (ins) src.set(ins, start); continue; } // same length: in place
     const dst = new Float32Array(src.length - (end - start) + insLen);
     dst.set(src.subarray(0, start), 0);
-    if (insert) dst.set(insert[c % insert.length], start);
+    if (ins) dst.set(ins, start);
     dst.set(src.subarray(end), start + insLen);
-    out.push(dst);
+    doc.channels[c] = dst;
   }
-  doc.channels = out;
 }
-function copySel() {
-  if (!hasSel()) return;
-  clipboard = { channels: doc.channels.map(c => c.slice(sel.start, sel.end)), sampleRate: doc.sampleRate };
-  setMsg(`Copied ${fmtTime(sel.end - sel.start)}`);
-  updateUI();
-}
-function deleteSel(msg = 'Deleted') {
-  if (!hasSel()) return;
-  pushUndo();
-  const s = sel.start;
-  replaceRange(sel.start, sel.end, null);
-  sel = null; cursor = s;
-  afterEdit(); setMsg(msg);
-}
-function cutSel() { if (!hasSel()) return; copySel(); deleteSel('Cut'); }
-function paste() {
-  if (!clipboard || !hasDoc()) return;
-  pushUndo();
-  let at = cursor;
-  if (hasSel()) { at = sel.start; replaceRange(sel.start, sel.end, null); }
-  let ins = clipboard.channels;
-  if (clipboard.sampleRate !== doc.sampleRate) ins = ins.map(c => resample(c, clipboard.sampleRate, doc.sampleRate));
-  replaceRange(at, at, ins);
-  sel = { start: at, end: at + ins[0].length }; cursor = at;
-  afterEdit(); setMsg('Pasted');
-}
-function resample(src, from, to) {
-  const ratio = from / to, n = Math.round(src.length / ratio), out = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const x = i * ratio, i0 = Math.min(Math.floor(x), src.length - 1), i1 = Math.min(i0 + 1, src.length - 1), t = x - i0;
-    out[i] = src[i0] * (1 - t) + src[i1] * t;
-  }
-  return out;
-}
-function trim() {
-  if (!hasSel()) return;
-  pushUndo();
-  doc.channels = doc.channels.map(c => c.slice(sel.start, sel.end));
-  sel = null; cursor = 0;
-  afterEdit(); zoomFit(); setMsg('Trimmed');
-}
-function applyRange(fn, label) {
-  if (!hasDoc()) return;
-  const r = selOrAll();
-  pushUndo();
-  for (const ch of doc.channels) fn(ch, r.start, r.end);
-  afterEdit(); setMsg(label);
-}
-function silence() { if (hasSel()) applyRange((ch, s, e) => ch.fill(0, s, e), 'Silenced'); }
-function fadeIn() { applyRange((ch, s, e) => { const n = e - s; for (let i = s; i < e; i++) ch[i] *= (i - s) / n; }, 'Fade in'); }
-function fadeOut() { applyRange((ch, s, e) => { const n = e - s; for (let i = s; i < e; i++) ch[i] *= 1 - (i - s) / n; }, 'Fade out'); }
-function reverse() { applyRange((ch, s, e) => ch.subarray(s, e).reverse(), 'Reversed'); }
-function normalize() {
-  if (!hasDoc()) return;
-  const r = selOrAll();
-  let peak = 0;
-  for (const ch of doc.channels) for (let i = r.start; i < r.end; i++) { const a = Math.abs(ch[i]); if (a > peak) peak = a; }
-  if (peak === 0) { setMsg('Nothing to normalize (silence)'); return; }
-  const g = 0.977 / peak; // about -0.2 dB
-  applyRange((ch, s, e) => { for (let i = s; i < e; i++) ch[i] *= g; }, `Normalized (x${g.toFixed(2)})`);
-}
-function gain() {
-  const db = parseFloat($('gainDb').value) || 0;
-  const g = Math.pow(10, db / 20);
-  applyRange((ch, s, e) => { for (let i = s; i < e; i++) ch[i] *= g; }, `Gain ${db > 0 ? '+' : ''}${db} dB`);
-}
+function copySel() { if (hasSel()) run('copy'); }
+function deleteSel() { if (hasSel()) run('delete'); }
+function cutSel() { if (hasSel()) run('cut'); }
+function paste() { if (rs.hasClip) run('paste'); }
+function trim() { if (hasSel()) run('trim').then(zoomFit); }
+function silence() { if (hasSel()) run('silence'); }
+function fadeIn() { run('fadeIn'); }
+function fadeOut() { run('fadeOut'); }
+function reverse() { run('reverse'); }
+function normalize() { run('normalize'); }
+function gain() { run('gain', parseFloat($('gainDb').value) || 0); }
 function selectAll() { if (hasDoc()) { sel = { start: 0, end: length() }; cursor = 0; updateUI(); draw(); } }
 
 // ---------- View / Zoom ----------
@@ -568,11 +481,11 @@ function updateUI() {
   for (const id of ['btnExport', 'btnExportMp3', 'btnPlay', 'btnStop', 'btnFadeIn', 'btnFadeOut', 'btnNormalize', 'btnReverse', 'btnGain', 'btnZoomIn', 'btnZoomOut', 'btnZoomFit'])
     $(id).disabled = !d;
   for (const id of ['btnCut', 'btnCopy', 'btnDelete', 'btnTrim', 'btnSilence', 'btnZoomSel']) $(id).disabled = !s;
-  $('btnPaste').disabled = !d || !clipboard;
+  $('btnPaste').disabled = !d || !rs.hasClip;
   $('btnExport').disabled = !d || exporting;
   $('btnExportMp3').disabled = !d || exporting;
-  $('btnUndo').disabled = !undoStack.length;
-  $('btnRedo').disabled = !redoStack.length;
+  $('btnUndo').disabled = !rs.canUndo;
+  $('btnRedo').disabled = !rs.canRedo;
   $('btnPlay').innerHTML = playing ? '&#10074;&#10074; Pause' : '&#9654; Play';
   $('stFile').textContent = d ? (doc.dirty ? '* ' : '') + doc.name : 'No file';
   const chName = !d ? '' : doc.channels.length === 1 ? 'Mono' : doc.channels.length === 2 ? 'Stereo' : doc.channels.length + ' ch';
@@ -643,14 +556,8 @@ scrollbar.addEventListener('mousedown', (e) => {
   view.start = frac * length() - wave.clientWidth * view.spp / 2; clampView(); draw();
 });
 
-// drag & drop
-document.body.addEventListener('dragover', (e) => { e.preventDefault(); empty.classList.add('drag'); });
-document.body.addEventListener('dragleave', () => empty.classList.remove('drag'));
-document.body.addEventListener('drop', async (e) => {
-  e.preventDefault(); empty.classList.remove('drag');
-  const f = e.dataTransfer.files[0];
-  if (f) loadArrayBuffer(f.name, await f.arrayBuffer());
-});
+// drag & drop (the window hands us the file path, so Rust can read it directly)
+window.audify.onDrop((over) => empty.classList.toggle('drag', over), loadPath);
 
 // ---------- Keyboard ----------
 window.addEventListener('keydown', (e) => {
@@ -690,6 +597,6 @@ for (const id of ['mp3Rate', 'chkLoop', 'gainDb']) $(id).addEventListener('chang
 $('btnGain').addEventListener('click', () => $('btnGain').blur());
 
 window.addEventListener('resize', resize);
-window.audify.guardClose(() => doc.dirty);
+window.audify.guardClose();
 resize();
 updateUI();

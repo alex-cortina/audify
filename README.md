@@ -4,11 +4,11 @@ A small, fast audio file editor for windows.
 
 **Download:** get the Windows installer from the [Releases page](https://github.com/alex-cortina/audify/releases/latest).
 
-Built with [Tauri](https://tauri.app): a small Rust app that shows the editor in the WebView2 engine that comes with Windows.
+Built with [Tauri](https://tauri.app). The audio engine (decoding, edits, undo, WAV and MP3 export) is Rust in `src-tauri/src/`. The screen is HTML and JavaScript in `src/`, shown with the WebView2 engine that comes with Windows.
 
 ## Run
 
-You need [Node.js](https://nodejs.org), [Rust](https://rustup.rs) and the Visual Studio C++ Build Tools.
+You need [Node.js](https://nodejs.org), [Rust](https://rustup.rs) and the Visual Studio C++ Build Tools with the "C++ CMake tools" part (CMake builds the Opus decoder; the npm scripts find it for you).
 
 ```
 npm install
@@ -51,4 +51,4 @@ The installer lands in `src-tauri/target/release/bundle/nsis/`. The plain EXE is
 
 ## License
 
-MIT. See `LICENSE`. The bundled MP3 encoder (lamejs) is LGPL-3.0. See `THIRD_PARTY_NOTICES.md`.
+MIT. See `LICENSE`. The MP3 encoder (LAME) is LGPL and the decoder (Symphonia) is MPL-2.0. See `THIRD_PARTY_NOTICES.md`.

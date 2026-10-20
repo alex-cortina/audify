@@ -3,15 +3,12 @@
   "version": "0.1.0",
   "description": "A small, fast audio file editor.",
   "scripts": {
-    "start": "tauri dev",
-    "dist": "tauri build",
-    "tauri": "tauri"
+    "start": "node scripts/tauri.mjs dev",
+    "dist": "node scripts/tauri.mjs build",
+    "tauri": "node scripts/tauri.mjs"
   },
   "license": "MIT",
   "author": "Alex",
-  "dependencies": {
-    "lamejs": "^1.2.1"
-  },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.3"
   }
