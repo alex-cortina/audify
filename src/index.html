@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' blob:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost;">
   <title>Audify</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -70,6 +70,7 @@
     <span id="stMsg"></span>
   </footer>
 
+  <script src="bridge.js"></script>
   <script src="vendor/lame.min.js"></script>
   <script src="renderer.js"></script>
 </body>

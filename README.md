@@ -4,14 +4,18 @@ A small, fast audio file editor for windows.
 
 **Download:** get the Windows installer from the [Releases page](https://github.com/alex-cortina/audify/releases/latest).
 
+Built with [Tauri](https://tauri.app): a small Rust app that shows the editor in the WebView2 engine that comes with Windows.
+
 ## Run
+
+You need [Node.js](https://nodejs.org), [Rust](https://rustup.rs) and the Visual Studio C++ Build Tools.
 
 ```
 npm install
 npm start
 ```
 
-Open a file with `Ctrl+O`, or drop it on the window, or `npm start -- song.wav`.
+Open a file with `Ctrl+O`, or drop it on the window.
 Reads WAV, MP3, OGG, FLAC, M4A, AIFF. Also takes video files (MP4, MOV, MKV, WEBM) and rips out the audio track. Saves 16-bit WAV or MP3 (128/192/320 kbps).
 
 ## Keys
@@ -43,7 +47,7 @@ Fade In, Fade Out, Normalize, Reverse and Gain use the selection. With no select
 npm run dist
 ```
 
-The installer and a portable folder land in `dist/`.
+The installer lands in `src-tauri/target/release/bundle/nsis/`. The plain EXE is `src-tauri/target/release/audify.exe`.
 
 ## License
 
