@@ -275,9 +275,17 @@ function play() {
   updateUI();
   tick();
 }
+// The audio time you hear right now. currentTime moves in jumps (one audio block at a time)
+// and runs ahead of the speakers, so use the output timestamp and fill the gap with the
+// frame clock. This makes the playhead glide instead of stutter.
+function audioNow() {
+  const ts = actx.getOutputTimestamp ? actx.getOutputTimestamp() : null;
+  if (!ts || !ts.performanceTime) return actx.currentTime;
+  return ts.contextTime + (performance.now() - ts.performanceTime) / 1000;
+}
 function playheadSample() {
   if (!playing) return cursor;
-  const elapsed = (actx.currentTime - playStartCtx) * doc.sampleRate;
+  const elapsed = Math.max(0, audioNow() - playStartCtx) * doc.sampleRate;
   const span = playEndSample - playStartSample;
   return playStartSample + (source.loop ? elapsed % span : Math.min(elapsed, span));
 }
@@ -526,8 +534,11 @@ function drawNow() {
   const p = playing ? playheadSample() : cursor;
   const px = xOf(p);
   if (px >= 0 && px <= W) {
-    wctx.fillStyle = cssVar(playing ? '--playhead' : '--cursor');
-    wctx.fillRect(Math.round(px), 0, 1, H);
+    // Snap to whole screen pixels so the line stays one sharp color on any display scale.
+    wctx.setTransform(1, 0, 0, 1, 0, 0);
+    wctx.fillStyle = cssVar('--cursor');
+    wctx.fillRect(Math.round(px * dpr), 0, Math.max(1, Math.round(dpr)), wave.height);
+    wctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
   drawRuler();
 }
@@ -679,6 +690,6 @@ for (const id of ['mp3Rate', 'chkLoop', 'gainDb']) $(id).addEventListener('chang
 $('btnGain').addEventListener('click', () => $('btnGain').blur());
 
 window.addEventListener('resize', resize);
-window.addEventListener('beforeunload', (e) => { if (doc.dirty) { e.preventDefault(); e.returnValue = ''; } });
+window.audify.guardClose(() => doc.dirty);
 resize();
 updateUI();

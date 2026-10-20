@@ -4,12 +4,11 @@
   --border: #2b3038;
   --text: #d8dce3;
   --muted: #8a919c;
-  --accent: #4fa3ff;
-  --wave: #6fd0a2;
-  --wave2: #58b58a;
-  --sel: rgba(79, 163, 255, 0.22);
-  --cursor: #ffcc4d;
-  --playhead: #ff5d5d;
+  --accent: #ffa359;
+  --wave: #ffa359;
+  --wave2: #d9813f;
+  --sel: rgba(255, 255, 255, 0.07);
+  --cursor: #ffffff;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
